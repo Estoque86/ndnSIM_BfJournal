@@ -156,6 +156,7 @@ main (int argc, char *argv[23])
   cmd.AddValue ("valoreAlpha", "Zipf's Parameter", alpha);
   cmd.AddValue ("lambda", "Request Frequency", lambda);
   cmd.AddValue ("simDuration", "Simulation Length", simDuration);
+  cmd.AddValue ("simStrategy", "Forwarding Strategy", simStrategy);
 
   cmd.Parse (argc, argv);
 
