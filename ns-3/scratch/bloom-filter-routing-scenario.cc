@@ -50,16 +50,6 @@ NS_LOG_COMPONENT_DEFINE ("ndn.NewRouting");
 
 std::vector<std::vector<bool> > readAdjMat (std::string adj_mat_file_name);
 std::vector<std::vector<double> > readCordinatesFile (std::string node_coordinates_file_name);
-void InterestScartatiFailureTrace(Ptr<OutputStreamWrapper> stream);
-void InterestInviatiRicevutiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const InterestHeader> header, Ptr<const Face> face);
-void DataInviatiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObjectHeader> header, bool local, Ptr<const Face> face);
-void DataRicevutiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObjectHeader> header, Ptr<const Face> face);
-void DataInCaheAppTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObjectHeader> header);
-void UpdateD0D1InviatiTrace(Ptr<OutputStreamWrapper> stream, uint32_t locOrForw, uint32_t numInterf);
-void UpdateD0D1InviatiTrace_Old(Ptr<OutputStreamWrapper> stream);
-void UpdateD0D1RicevutiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const Face> face);
-void PercD0D1Trace(Ptr<OutputStreamWrapper> stream, const std::vector<double>* componenti);
-void EntryExpTrace(Ptr<OutputStreamWrapper> stream, Ptr<const InterestHeader> header);
 
 //void DownloadTimeTrace(Ptr<OutputStreamWrapper> stream, const std::string* header, int64_t time_sent, int64_t time, uint32_t dist);
 void DownloadTimeFileTrace(Ptr<OutputStreamWrapper> stream, const std::string* header, int64_t time_sent, int64_t time, uint32_t dist);
@@ -79,7 +69,7 @@ void DownloadTimeTrace(Ptr<OutputStreamWrapper> stream, const std::string* heade
 
 
 int
-main (int argc, char *argv[19])
+main (int argc, char *argv[23])
 {
   struct rlimit newlimit;
   const struct rlimit * newlimitP;
@@ -115,7 +105,7 @@ main (int argc, char *argv[19])
 
 
   //uint32_t nGrid = 3;
-  Time finishTime = Seconds (11500.0);
+  //Time finishTime = Seconds (11500.0);
 
 
   // ** [MT] ** Parameters passed with command line
@@ -140,6 +130,9 @@ main (int argc, char *argv[19])
   	  	  	  	  	  	  	  	  	  		 // 2 = BEST ROUTE
   	  	  	  	  	  	  	  	  	    	 // 3 = BF
   double alpha = 1;
+  uint32_t lambda = 1;
+  std::string simStrategy = "";
+  uint32_t simDuration = 100;
 
 
   CommandLine cmd;
@@ -161,6 +154,8 @@ main (int argc, char *argv[19])
   cmd.AddValue ("cacheToCatalog", "Cache to Catalog Ratio", cacheToCatalog);
   cmd.AddValue ("simType", "Chosen Simulation Scenario", simType);
   cmd.AddValue ("valoreAlpha", "Zipf's Parameter", alpha);
+  cmd.AddValue ("lambda", "Request Frequency", lambda);
+  cmd.AddValue ("simDuration", "Simulation Length", simDuration);
 
   cmd.Parse (argc, argv);
 
@@ -195,13 +190,19 @@ main (int argc, char *argv[19])
   {
   case(1):
 	 simulationType = "Flooding";
-  	 ss << simulationType << "_alpha_" << alpha << "_" << SeedManager::GetRun();
+  	 ss << simulationType << "_alpha_" << alpha << "_R_" << SeedManager::GetRun();
   	 stringScenario = ss.str();
   	 ss.str("");
      break;
+  case(2):
+ 	 simulationType = "ShortestPath";
+   	 ss << simulationType << "_alpha_" << alpha << "_R_" << SeedManager::GetRun();
+   	 stringScenario = ss.str();
+   	 ss.str("");
+      break;
   case(3):
 	 simulationType = "BloomFilter";
-	 ss << simulationType << "_alpha_" << alpha << "_" << "cell_" << cellWidthBfFib << "_run_" << SeedManager::GetRun();
+	 ss << simulationType << "_" << bfFibInitMethod << "_alpha_" << alpha << "_" << "cell_" << cellWidthBfFib << "_R_" << SeedManager::GetRun();
 	 stringScenario = ss.str();
      ss.str("");
      break;
@@ -214,7 +215,7 @@ main (int argc, char *argv[19])
 
   // ** [MT] ** Create topology by reading topology file
   AnnotatedTopologyReader topologyReader ("", 10);
-  topologyReader.SetFileName ("/media/DATI/tortelli/Simulazioni_BF_SpecialIssue/ndnSIM_Routing_NewBf/TOPOLOGIES/Geant_Topo_Only.txt");
+  topologyReader.SetFileName ("/Users/michele/Desktop/Dottorato/ndnSIM_BfJournal/TOPOLOGIES/Geant_Topo_Only.txt");
   topologyReader.Read ();
 
   // ** [MT] ** Total number of nodes in the simulated topology
@@ -274,8 +275,12 @@ main (int argc, char *argv[19])
   //PATH_REPO= "/media/DATI/tortelli/Simulazioni_BF_SpecialIssue/ndnSIM_Routing_NewBf/SEED_COPIES/NEW/repository2_";         // Two files (2_1 e 2_2) with equal number of contents.
 
 
-  std::string SCOPE, INIT, CATALOG, PFP, WIDTH, CUSTOMLENGTH, CUSTOMHASHES;
+  std::string SCOPE, INIT, CATALOG, PFP, WIDTH, CUSTOMLENGTH, CUSTOMHASHES, lambdaStr;
   std::string INITCACHE, CATALOGCACHE, PFPCACHE, WIDTHCACHE, CUSTOMLENGTHCACHE, CUSTOMHASHESCACHE;
+
+  ss << lambda;
+  lambdaStr = ss.str();
+  ss.str("");
 
   ss << bfScope;
   SCOPE = ss.str();
@@ -336,6 +341,7 @@ main (int argc, char *argv[19])
 
   NS_LOG_INFO ("Installing Ndn stack on all nodes");
   ndn::StackHelper ndnHelper;
+  ndn::GlobalRoutingHelper ndnGlobalRoutingHelper;
 
   // ** [MT] ** Change the Forwarding Strategy according to the simulated scenario
   if(simType == 3)
@@ -347,6 +353,16 @@ main (int argc, char *argv[19])
   {
 	  ndnHelper.SetForwardingStrategy("ns3::ndn::fw::Flooding");
 	  ndnHelper.SetDefaultRoutes(true);
+  }
+  else // ShortestPath
+   {
+ 	  ndnHelper.SetForwardingStrategy("ns3::ndn::fw::Flooding");
+ 	  //ndnHelper.SetDefaultRoutes(true);
+   }
+
+  if(simType == 2)         // If in ShortestPath scenario, the routing helper is installed in each node.
+  {
+	ndnGlobalRoutingHelper.InstallAll ();
   }
 
 
@@ -512,7 +528,7 @@ main (int argc, char *argv[19])
   std::ifstream fin;
 
   //PATH_REPO= "/media/DATI/tortelli/COPIE_SEED/repository2_";         // Ci sono due file (2_1 e 2_2) con ugual numero di contenuti
-  PATH_REPO= "/media/DATI/tortelli/Simulazioni_BF_SpecialIssue/ndnSIM_Routing_NewBf/SEED_COPIES/NEW/repository2_";         // Ci sono due file (2_1 e 2_2) con ugual numero di contenuti
+  PATH_REPO= "/Users/michele/Desktop/Dottorato/ndnSIM_BfJournal/SEED_COPIES/NEW/repository2_";         // Ci sono due file (2_1 e 2_2) con ugual numero di contenuti
 
   // I repository sono più di uno
   for(uint32_t i = 0; i < repositoriesID->size(); i++)
@@ -540,6 +556,9 @@ main (int argc, char *argv[19])
   	    packet->AddHeader (*header);
   	    packet->AddTrailer (tail);
 
+ 	    if (simType==2)
+ 	    	ndnGlobalRoutingHelper.AddOrigin (line, nd);
+
   	    nd->GetObject<Repo> ()->Add (header, packet);
   	 }
   	 fin.close();
@@ -554,7 +573,7 @@ main (int argc, char *argv[19])
 
   ndn::AppHelper consumerHelper ("ns3::ndn::ConsumerCbr");                    // ***** CARATTERIZZAZIONE DELL'APPLICAZIONE CONSUMER
   consumerHelper.SetPrefix (prefix);
-  consumerHelper.SetAttribute ("Frequency", StringValue ("1"));               // ***** FREQUENZA DI GENERAZIONE (/s) DEGLI INTEREST
+  consumerHelper.SetAttribute ("Frequency", StringValue (lambdaStr));               // ***** FREQUENZA DI GENERAZIONE (/s) DEGLI INTEREST
   //consumerHelper.SetAttribute ("StartTime", TimeValue (Seconds (2.000000)));
   ApplicationContainer consumers = consumerHelper.Install (consumerNodes);
   consumers.Start (Seconds(2));
@@ -591,63 +610,26 @@ main (int argc, char *argv[19])
   //**** DOWNLOAD TIME (Tracing a livello Applicativo - Download Time, sia First Chunk che Complete File)
   std::string fnDwnTime;
 
-  
-  switch (simType)
-  {
-  case(1):
-  case(2):
+  ss << "logs/Interest_Nodo_";
+  fnInterest = ss.str();
+  ss.str("");
 
-  	  ss << "RISULTATI_NEW/" <<  simulationType << "/INTEREST/Interest_Nodo_";
-      fnInterest = ss.str();
-      ss.str("");
+  ss << "logs/Data_Nodo_";
+  fnData = ss.str();
+  ss.str("");
 
-  	  ss << "RISULTATI_NEW/" <<  simulationType << "/DATA/Data_Nodo_";
-      fnData = ss.str();
-      ss.str("");
+  ss << "logs/DataRicevutiApp_Nodo_";
+  fnDataApp = ss.str();
+  ss.str("");
 
-  	  ss << "RISULTATI_NEW/" <<  simulationType << "/DATA/APP/DataRICEVUTI_APP_Nodo_";
-      fnDataApp = ss.str();
-      ss.str("");
+  ss << "logs/InterestApp_Nodo_";
+  fnInterestApp = ss.str();
+  ss.str("");
 
-      ss << "RISULTATI_NEW/" <<  simulationType << "/INTEREST/APP/Interest_APP_Nodo_";
-      fnInterestApp = ss.str();
-      ss.str("");
+  ss << "logs/DownloadTime_Nodo_";
+  fnDwnTime = ss.str();
+  ss.str("");
 
-      ss << "RISULTATI_NEW/" <<  simulationType << "/DOWNLOAD/APP/DownloadTime_Nodo_";
-      fnDwnTime = ss.str();
-      ss.str("");
-
-      break;
-
-  case(3):
-
-  	  ss << "RISULTATI_NEW/" <<  simulationType << "/" << bfScope << "/" << bfTypeFib << "/INTEREST/Interest_Nodo_";
-      fnInterest = ss.str();
-      ss.str("");
-
-   	  ss << "RISULTATI_NEW/" <<  simulationType << "/" << bfScope << "/" << bfTypeFib << "/DATA/Data_Nodo_";
-      fnData = ss.str();
-      ss.str("");
-
-   	  ss << "RISULTATI_NEW/" <<  simulationType << "/" << bfScope << "/" << bfTypeFib << "/DATA/APP/DataRICEVUTI_APP_Nodo_";
-      fnDataApp = ss.str();
-      ss.str("");
-
-      ss << "RISULTATI_NEW/" <<  simulationType << "/" << bfScope << "/" << bfTypeFib << "/INTEREST/APP/Interest_APP_Nodo_";
-      fnInterestApp = ss.str();
-      ss.str("");
-
-      ss << "RISULTATI_NEW/" <<  simulationType << "/" << bfScope << "/" << bfTypeFib << "/DOWNLOAD/APP/DownloadTime_Nodo_";
-      fnDwnTime = ss.str();
-      ss.str("");
-
-      break;
-      
-  default:
-	 NS_LOG_UNCOND ("Inserire una FORWARDING STRATEGY VALIDA!!");
-	 exit(1);
-	 break;
-  }
 
   //NS_LOG_UNCOND(fnInterest << "\n" << fnData << "\n" << fnDataApp << "\n" << fnInterestApp << "\n" << fnDwnTime << "\n");
 
@@ -659,13 +641,13 @@ main (int argc, char *argv[19])
 	  // ************ NOMI FILE ******************
 
 	  // **** INTEREST
-	  fname << fnInterest << ((*node)->GetId()+1) << "." << stringScenario;
+	  fname << fnInterest << ((*node)->GetId()+1) << "_" << stringScenario;
 	  std::string nome_file_interest = fname.str();
 	  const char *filename_interest = nome_file_interest.c_str();
 	  fname.str("");
 
 	  // **** DATA
-	  fname << fnData << ((*node)->GetId()+1) << "." << stringScenario;
+	  fname << fnData << ((*node)->GetId()+1) << "_" << stringScenario;
 	  std::string nome_file_data = fname.str();
 	  const char *filename_data = nome_file_data.c_str();
 	  fname.str("");
@@ -692,19 +674,19 @@ main (int argc, char *argv[19])
   for (NodeContainer::Iterator node_app = consumerNodes.Begin(); node_app != consumerNodes.End(); ++node_app)
   {
 	  // **** DATA APP
-	  fname << fnDataApp << ((*node_app)->GetId()+1) << "." << stringScenario;
+	  fname << fnDataApp << ((*node_app)->GetId()+1) << "_" << stringScenario;
 	  std::string nome_file_data_app = fname.str();
 	  const char *filename_data_app = nome_file_data_app.c_str();
 	  fname.str("");
 
 	  // **** INTEREST APP
-	  fname << fnInterestApp << ((*node_app)->GetId()+1) << "." << stringScenario;
+	  fname << fnInterestApp << ((*node_app)->GetId()+1) << "_" << stringScenario;
       std::string nome_file_interest_app = fname.str();
       const char *filename_interest_app = nome_file_interest_app.c_str();
       fname.str("");
 
       // **** DOWNLOAD TIME
-      fname << fnDwnTime << ((*node_app)->GetId()+1) << "." << stringScenario;
+      fname << fnDwnTime << ((*node_app)->GetId()+1) << "_" << stringScenario;
       std::string nome_file_download_time = fname.str();
       const char *filename_download_time = nome_file_download_time.c_str();
       fname.str("");
@@ -730,13 +712,19 @@ main (int argc, char *argv[19])
   }
 
   // **************************************************************************************************************************
+  if(simType == 2)
+  {
+	  NS_LOG_UNCOND("Starting Djikstra and Populating FIBs\t" << Simulator::Now());
+      ndnGlobalRoutingHelper.CalculateRoutes ();
+      NS_LOG_UNCOND("Finishing Djikstra and Populating FIBs\t" << Simulator::Now());
+  }
 
 
   delete repositoriesID;
 
+  Simulator::Stop (Seconds (simDuration));
 
-
-  Simulator::Stop (finishTime);
+  //Simulator::Stop (finishTime);
 
   NS_LOG_INFO ("Run Simulation.");
   Simulator::Run ();
@@ -868,70 +856,7 @@ std::vector<std::vector<double> > readCordinatesFile (std::string node_coordinat
 
 }
 
-void
-InterestInviatiRicevutiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const Interest> header, Ptr<const Face> face)
-{
-	 *stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  header->GetName() << "\t" << face->GetId() << std::endl;
-	 //NS_LOG_UNCOND(Simulator::Now().GetSeconds() <<  header->GetName() << face->GetId());
-}
 
-void DataInviatiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObject> header, bool local, Ptr<const Face> face)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  header->GetName() << "\t" << local << "\t" <<  face->GetId() << std::endl;
-}
-
-void DataRicevutiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObject> header, Ptr<const Face> face)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  header->GetName() << "\t" <<  face->GetId() << std::endl;
-}
-
-
-void
-EntryExpTrace(Ptr<OutputStreamWrapper> stream, Ptr<const Interest> header)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  header->GetName() << std::endl;
-}
-
-/*void DownloadTimeTrace(Ptr<OutputStreamWrapper> stream, const std::string* header, int64_t time_sent, int64_t time, uint32_t dist)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  *header << "\t" << time_sent << "\t" << time << "\t" << dist << std::endl;
-}*/
-
-void DownloadTimeFileTrace(Ptr<OutputStreamWrapper> stream, const std::string* header, int64_t time_sent, int64_t time, uint32_t dist)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  *header << "\t" << time_sent << "\t" << time << "\t" << dist << std::endl;
-}
-
-
-//void UncompleteFileTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObjectHeader> header)
-//{
-//	*stream->GetStream() << Simulator::Now().GetNanoSeconds() << "\t" <<  header->GetName() << std::endl;
-//}
-
-void UncompleteFileTrace(Ptr<OutputStreamWrapper> stream, const std::string* header, int64_t time_sent)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  *header << "\t" << time_sent << "\t" << std::endl;
-}
-
-void DataScartatiTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObject> header, uint32_t dropUnsol)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  header->GetName() << "\t" << dropUnsol << std::endl;
-}
-
-void InterestEliminatiTrace(Ptr<OutputStreamWrapper> stream, const std::string* header, int64_t time_sent)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  *header << "\t" << time_sent << std::endl;
-}
-
-void InterestInviatiAppTrace(Ptr<OutputStreamWrapper> stream, const std::string* interest)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  *interest << std::endl;
-}
-
-void DataInCaheAppTrace(Ptr<OutputStreamWrapper> stream, Ptr<const ContentObject> header)
-{
-	*stream->GetStream() << Simulator::Now().GetMicroSeconds() << "\t" <<  header->GetName() << std::endl;
-}
 
 
 // *************************+
